@@ -22,6 +22,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.Locale
+import java.util.concurrent.Executors
 
 private data class Channel(
     var name: String,
@@ -44,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private var exportItems: List<Channel> = emptyList()
     private var backupMode = false
     private var playlistName = "Mi lista IPTV"
+    private val importExecutor = Executors.newSingleThreadExecutor()
+    private val maxVisibleChannels = 300
 
     private val importFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) readPlaylist(uri)
@@ -186,14 +189,18 @@ class MainActivity : AppCompatActivity() {
                 else -> c.group.equals(selectedCategory, true)
             }
             categoryMatch && (searchTerm.isBlank() || c.name.contains(searchTerm, true) || c.group.contains(searchTerm, true))
-        }.sortedWith(compareBy<Channel>({ episodeInfo(it.name).series.lowercase(Locale.ROOT) }, { episodeInfo(it.name).season }, { episodeInfo(it.name).episode }, { it.name.lowercase(Locale.ROOT) }))
-        status.text = "$playlistName · ${channels.size} elementos · ${selectedCategory} · ${filtered.size} visibles"
+        }
+        status.text = "$playlistName · ${channels.size} elementos · ${selectedCategory} · ${filtered.size} encontrados"
         if (filtered.isEmpty()) {
             listBox.addView(text("No hay elementos en esta categoría. Importa una lista M3U o elige otra categoría.", 15f))
             return
         }
+        val visibleChannels = filtered.take(maxVisibleChannels)
+        if (filtered.size > maxVisibleChannels) {
+            listBox.addView(text("Mostrando los primeros $maxVisibleChannels de ${filtered.size}. Usa Buscar para encontrar otros canales.", 13f))
+        }
         var lastEpisodeHeader = ""
-        filtered.forEach { channel ->
+        visibleChannels.forEach { channel ->
             if (channel.group.equals("SERIES", true) || channel.group.equals("TELENOVELAS", true)) {
                 val ep = episodeInfo(channel.name)
                 val header = "${ep.series} · Temporada ${ep.season}"
@@ -278,29 +285,125 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun readPlaylist(uri: Uri) {
-        try {
-            contentResolver.openInputStream(uri)?.use { stream ->
-                val parsed = parseM3u(BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readLines())
-                if (parsed.isEmpty()) { toast("No encontré canales válidos en el archivo"); return }
-                channels.clear(); channels.addAll(parsed); save(); selectedCategory = "TODAS"; renderChannels()
-                toast("Lista importada: ${parsed.size} elementos")
-            }
-        } catch (e: Exception) { toast("No se pudo leer el archivo M3U") }
-    }
+        status.text = "Preparando importación de la lista M3U…"
 
-    private fun parseM3u(lines: List<String>): List<Channel> {
-        val result = mutableListOf<Channel>(); var name = ""; var group = "TV EN VIVO"; var logo = ""; var tvgId = ""
-        for (raw in lines) {
-            val line = raw.trim()
-            if (line.startsWith("#EXTINF", true)) {
-                name = line.substringAfterLast(',').trim().ifBlank { "Sin nombre" }
-                group = Regex("group-title=\"([^\"]*)\"", RegexOption.IGNORE_CASE).find(line)?.groupValues?.get(1) ?: "TV EN VIVO"
-                logo = Regex("tvg-logo=\"([^\"]*)\"", RegexOption.IGNORE_CASE).find(line)?.groupValues?.get(1) ?: ""
-                tvgId = Regex("tvg-id=\"([^\"]*)\"", RegexOption.IGNORE_CASE).find(line)?.groupValues?.get(1) ?: ""
-            } else if (line.isNotBlank() && !line.startsWith("#") && name.isNotBlank()) {
-                result.add(Channel(name, line, normalizeGroup(group, name, line), logo, false, tvgId)); name = ""
+        val progressText = TextView(this).apply {
+            text = "Abriendo archivo…"
+            setPadding(dp(20), dp(12), dp(20), dp(8))
+        }
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            setPadding(dp(20), 0, dp(20), dp(12))
+        }
+        val progressPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(progressText)
+            addView(progressBar)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Importando lista M3U")
+            .setView(progressPanel)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+
+        importExecutor.execute {
+            try {
+                val parsed = contentResolver.openInputStream(uri)?.use { stream ->
+                    val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8), 64 * 1024)
+                    parseM3u(reader) { count ->
+                        if (count % 1000 == 0) {
+                            runOnUiThread {
+                                if (!isFinishing && dialog.isShowing) {
+                                    progressText.text = "Procesando… $count canales encontrados"
+                                }
+                            }
+                        }
+                    }
+                } ?: emptyList()
+
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    dialog.dismiss()
+
+                    if (parsed.isEmpty()) {
+                        status.text = "No se encontraron canales válidos"
+                        toast("No encontré canales válidos. Comprueba que sea una lista M3U.")
+                        return@runOnUiThread
+                    }
+
+                    channels.clear()
+                    channels.addAll(parsed)
+                    selectedCategory = "TODAS"
+                    searchTerm = ""
+                    renderChannels()
+                    save()
+                    status.text = "$playlistName · ${parsed.size} canales importados · TODAS"
+                    toast("Lista importada: ${parsed.size} canales")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        dialog.dismiss()
+                        status.text = "Error al importar la lista M3U"
+                        toast("No se pudo leer el archivo: ${e.localizedMessage ?: "error desconocido"}")
+                    }
+                }
             }
         }
+    }
+
+    private fun parseM3u(
+        reader: BufferedReader,
+        onProgress: (Int) -> Unit
+    ): List<Channel> {
+        val result = ArrayList<Channel>()
+        var name = ""
+        var group = "TV EN VIVO"
+        var logo = ""
+        var tvgId = ""
+        var lineCount = 0
+
+        while (true) {
+            val raw = reader.readLine() ?: break
+            lineCount++
+            val line = raw.trim().removePrefix("\uFEFF")
+
+            if (line.startsWith("#EXTINF", true)) {
+                // En M3U, la primera coma separa los atributos del nombre.
+                val commaIndex = line.indexOf(',')
+                name = if (commaIndex >= 0) {
+                    line.substring(commaIndex + 1).trim().ifBlank { "Sin nombre" }
+                } else {
+                    "Sin nombre"
+                }
+
+                group = Regex("group-title=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
+                    .find(line)?.groupValues?.get(1) ?: "TV EN VIVO"
+                logo = Regex("tvg-logo=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
+                    .find(line)?.groupValues?.get(1) ?: ""
+                tvgId = Regex("tvg-id=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
+                    .find(line)?.groupValues?.get(1) ?: ""
+            } else if (line.isNotBlank() && !line.startsWith("#") && name.isNotBlank()) {
+                result.add(
+                    Channel(
+                        name = name,
+                        url = line,
+                        group = normalizeGroup(group, name, line),
+                        logo = logo,
+                        favorite = false,
+                        tvgId = tvgId
+                    )
+                )
+                name = ""
+                group = "TV EN VIVO"
+                logo = ""
+                tvgId = ""
+                if (result.size % 1000 == 0) onProgress(result.size)
+            }
+        }
+
+        onProgress(result.size)
         return result
     }
 
@@ -347,9 +450,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun save() {
-        val arr = JSONArray()
-        channels.forEach { c -> arr.put(JSONObject().put("name", c.name).put("url", c.url).put("group", c.group).put("logo", c.logo).put("favorite", c.favorite).put("tvgId", c.tvgId)) }
-        getSharedPreferences("iptv", MODE_PRIVATE).edit().putString("channels", arr.toString()).apply()
+        // La conversión de decenas de miles de canales a JSON se hace fuera del hilo visual.
+        val snapshot = channels.toList()
+        try {
+            importExecutor.execute {
+                try {
+                    val arr = JSONArray()
+                    snapshot.forEach { c ->
+                        arr.put(
+                            JSONObject()
+                                .put("name", c.name)
+                                .put("url", c.url)
+                                .put("group", c.group)
+                                .put("logo", c.logo)
+                                .put("favorite", c.favorite)
+                                .put("tvgId", c.tvgId)
+                        )
+                    }
+                    getSharedPreferences("iptv", MODE_PRIVATE)
+                        .edit()
+                        .putString("channels", arr.toString())
+                        .apply()
+                } catch (_: Exception) {
+                    runOnUiThread { toast("No se pudo guardar la lista en el dispositivo") }
+                }
+            }
+        } catch (_: Exception) {
+            toast("No se pudo iniciar el guardado de la lista")
+        }
     }
     private fun loadSaved() {
         playlistName = getSharedPreferences("iptv", MODE_PRIVATE).getString("playlistName", "Mi lista IPTV") ?: "Mi lista IPTV"
@@ -361,5 +489,10 @@ class MainActivity : AppCompatActivity() {
     }
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
-    override fun onDestroy() { playerView.player = null; player?.release(); player = null; super.onDestroy() }
-}
+    override fun onDestroy() {
+        importExecutor.shutdownNow()
+        playerView.player = null
+        player?.release()
+        player = null
+        super.onDestroy()
+    }
