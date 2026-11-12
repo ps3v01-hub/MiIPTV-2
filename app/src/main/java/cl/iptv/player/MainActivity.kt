@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
     private var backupMode = false
     private var playlistName = "Mi lista IPTV"
     private val importExecutor = Executors.newSingleThreadExecutor()
-    private val maxVisibleChannels = 300
+    private val maxVisibleChannels = 120
 
     private val importFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) readPlaylist(uri)
@@ -85,6 +85,16 @@ class MainActivity : AppCompatActivity() {
     private fun button(label: String, action: () -> Unit): Button = Button(this).apply {
         text = label; isAllCaps = false; textSize = 14f; setOnClickListener { action() }
         isFocusable = true; isFocusableInTouchMode = true
+        val shape = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = dp(8).toFloat()
+            setColor(0xFF182235.toInt())
+            setStroke(dp(1), 0xFF34445D.toInt())
+        }
+        background = shape
+        setOnFocusChangeListener { _, focused ->
+            shape.setColor(if (focused) 0xFF245CA8.toInt() else 0xFF182235.toInt())
+            shape.setStroke(dp(if (focused) 3 else 1), if (focused) 0xFF8BC2FF.toInt() else 0xFF34445D.toInt())
+        }
     }
 
     private fun buildUi() {
@@ -227,7 +237,21 @@ class MainActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Android API 33; retained for back navigation")
     override fun onBackPressed() {
-        if (fullScreen) toggleFullscreen() else super.onBackPressed()
+        if (fullScreen) {
+            toggleFullscreen()
+            return
+        }
+        if (selectedChannel != null) {
+            player?.stop()
+            player?.clearMediaItems()
+            selectedChannel = null
+            playerView.visibility = View.GONE
+            heroPlaceholder.visibility = View.VISIBLE
+            heroPlaceholder.text = "ELIGE ALGO PARA VER\\n\\nSelecciona un canal o contenido"
+            renderChannels()
+            return
+        }
+        super.onBackPressed()
     }
 
     private fun managePlaylist() {
@@ -312,7 +336,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val groups = if (selectedCategory == "TODAS") filtered.groupBy { it.group } else mapOf(selectedCategory to filtered)
-        groups.forEach { (groupName, items) ->
+        var visibleCount = 0
+        for ((groupName, items) in groups) {
+            if (visibleCount >= maxVisibleChannels) break
+            val visibleItems = items.take(maxVisibleChannels - visibleCount)
+            visibleCount += visibleItems.size
             val sectionTitle = text(groupName.uppercase(Locale.ROOT), 17f).apply {
                 setTextColor(0xFFEAF2FF.toInt())
                 setPadding(dp(2), dp(12), dp(2), dp(8))
@@ -320,7 +348,7 @@ class MainActivity : AppCompatActivity() {
             listBox.addView(sectionTitle)
             val horizontal = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
             val cards = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            items.take(maxVisibleChannels).forEach { channel ->
+            visibleItems.forEach { channel ->
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER_HORIZONTAL
@@ -331,7 +359,15 @@ class MainActivity : AppCompatActivity() {
                         if (selectedChannel?.url == channel.url) setStroke(dp(2), 0xFF55A5FF.toInt())
                     }
                     isFocusable = true
+                    isFocusableInTouchMode = true
                     isClickable = true
+                    val focusShape = background as android.graphics.drawable.GradientDrawable
+                    setOnFocusChangeListener { _, focused ->
+                        val selected = selectedChannel?.url == channel.url
+                        focusShape.setColor(if (focused || selected) 0xFF1B3C68.toInt() else 0xFF111B2B.toInt())
+                        focusShape.setStroke(dp(if (focused) 3 else if (selected) 2 else 0),
+                            if (focused) 0xFF8BC2FF.toInt() else 0xFF55A5FF.toInt())
+                    }
                     setOnClickListener {
                         selectedChannel = channel
                         heroPlaceholder.visibility = View.GONE
@@ -373,6 +409,11 @@ class MainActivity : AppCompatActivity() {
             }
             horizontal.addView(cards)
             listBox.addView(horizontal, LinearLayout.LayoutParams(-1, dp(174)))
+        }
+        if (filtered.size > visibleCount) {
+            listBox.addView(text("Mostrando $visibleCount de ${filtered.size} elementos. Usa la búsqueda para encontrar otros.", 12f).apply {
+                setTextColor(0xFF8E9BB0.toInt())
+            })
         }
         renderSidebar()
     }
