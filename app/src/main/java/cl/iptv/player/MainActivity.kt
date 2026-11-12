@@ -496,3 +496,4 @@ class MainActivity : AppCompatActivity() {
         player = null
         super.onDestroy()
     }
+}
