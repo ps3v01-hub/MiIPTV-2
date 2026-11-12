@@ -43,6 +43,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchView: EditText
     private lateinit var contentArea: LinearLayout
     private lateinit var channelScroll: ScrollView
+    private lateinit var sidebar: LinearLayout
+    private lateinit var mainContent: LinearLayout
+    private lateinit var heroContainer: FrameLayout
+    private lateinit var heroPlaceholder: TextView
     private var fullScreen = false
     private var selectedChannel: Channel? = null
     private var player: ExoPlayer? = null
@@ -84,57 +88,141 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildUi() {
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF080D18.toInt()); setPadding(dp(12), dp(8), dp(12), dp(8)) }
-        header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(text("MI IPTV", 23f), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(button("⛶ Pantalla completa") { toggleFullscreen() })
-        header.addView(button("＋ Importar M3U") { importFile.launch(arrayOf("*/*")) })
-        header.addView(button("⋮") { managePlaylist() })
-        root.addView(header)
-        status = text("$playlistName · Importa una lista M3U para comenzar", 12f).apply { setTextColor(0xFF9AA9BD.toInt()) }
-        root.addView(status)
-        val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("TV EN VIVO", "VOD", "SERIES", "TELENOVELAS", "DEPORTES", "FAVORITOS", "TODAS").forEach { category ->
-            tools.addView(button(category) { selectedCategory = category; renderChannels() })
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(0xFF080B13.toInt())
         }
-        toolsScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(tools) }
-        root.addView(toolsScroll)
+        sidebar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0D1422.toInt())
+            setPadding(dp(10), dp(18), dp(10), dp(12))
+        }
+        sidebar.addView(text("MI IPTV", 22f).apply {
+            setTextColor(0xFF70AFFF.toInt())
+            setPadding(dp(8), dp(8), dp(8), dp(24))
+        })
+        root.addView(sidebar, LinearLayout.LayoutParams(dp(174), -1))
+
+        mainContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+        }
+        header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(text("Inicio", 21f), LinearLayout.LayoutParams(0, -2, 1f))
         searchView = EditText(this).apply {
-            hint = "Buscar canales…"; setHintTextColor(0xFF8190A5.toInt()); setTextColor(0xFFFFFFFF.toInt())
-            setSingleLine(true); setPadding(dp(14), dp(6), dp(14), dp(6)); setBackgroundColor(0xFF151F30.toInt())
-            setOnEditorActionListener { v, _, _ -> searchTerm = v.text.toString().trim(); renderChannels(); true }
+            hint = "Buscar contenido"
+            setHintTextColor(0xFF8190A5.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            setSingleLine(true)
+            textSize = 14f
+            setPadding(dp(12), 0, dp(12), 0)
+            setBackgroundColor(0xFF182235.toInt())
+            setOnEditorActionListener { v, _, _ ->
+                searchTerm = v.text.toString().trim()
+                selectedCategory = "TODAS"
+                renderChannels()
+                true
+            }
         }
-        root.addView(searchView, LinearLayout.LayoutParams(-1, dp(46)))
-        contentArea = LinearLayout(this).apply {
-            orientation = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        header.addView(searchView, LinearLayout.LayoutParams(dp(210), dp(42)))
+        header.addView(button("⛶") { toggleFullscreen() })
+        header.addView(button("＋ Importar") { importFile.launch(arrayOf("*/*")) })
+        header.addView(button("⋮") { managePlaylist() })
+        mainContent.addView(header)
+
+        status = text("$playlistName · Tu entretenimiento en un solo lugar", 12f).apply {
+            setTextColor(0xFF8E9BB0.toInt())
         }
-        playerView = PlayerView(this).apply { player = this@MainActivity.player; useController = true; setBackgroundColor(0xFF000000.toInt()); controllerAutoShow = true }
-        channelScroll = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = true }
-        listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(5), dp(5), dp(5), dp(5)) }
+        mainContent.addView(status)
+
+        heroContainer = FrameLayout(this).apply {
+            setBackgroundColor(0xFF131E31.toInt())
+        }
+        playerView = PlayerView(this).apply {
+            player = this@MainActivity.player
+            useController = true
+            controllerAutoShow = true
+            setBackgroundColor(0xFF101827.toInt())
+            visibility = View.GONE
+        }
+        heroContainer.addView(playerView, FrameLayout.LayoutParams(-1, -1))
+        heroPlaceholder = text("TU IPTV, A TU MANERA", 24f).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setTextColor(0xFFEAF2FF.toInt())
+        }
+        heroContainer.addView(heroPlaceholder, FrameLayout.LayoutParams(-1, -1))
+        mainContent.addView(heroContainer, LinearLayout.LayoutParams(-1, dp(285)).apply {
+            topMargin = dp(10)
+            bottomMargin = dp(12)
+        })
+
+        channelScroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+        }
+        listBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(16))
+        }
         channelScroll.addView(listBox)
-        if (contentArea.orientation == LinearLayout.HORIZONTAL) {
-            contentArea.addView(playerView, LinearLayout.LayoutParams(0, -1, 0.64f))
-            contentArea.addView(channelScroll, LinearLayout.LayoutParams(0, -1, 0.36f))
-        } else {
-            contentArea.addView(playerView, LinearLayout.LayoutParams(-1, dp(220)))
-            contentArea.addView(channelScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        }
-        root.addView(contentArea, LinearLayout.LayoutParams(-1, 0, 1f))
+        mainContent.addView(channelScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(mainContent, LinearLayout.LayoutParams(0, -1, 1f))
         setContentView(root)
+        renderSidebar()
+    }
+
+    private fun renderSidebar() {
+        if (!::sidebar.isInitialized) return
+        while (sidebar.childCount > 1) sidebar.removeViewAt(1)
+        val base = listOf("INICIO", "TV EN VIVO", "VOD", "SERIES", "TELENOVELAS", "DEPORTES", "FAVORITOS", "TODAS")
+        val dynamic = channels.map { it.group }.distinct().filter { it !in base }
+        (base + dynamic).forEach { category ->
+            val active = selectedCategory == category || (category == "INICIO" && selectedCategory == "TODAS")
+            val item = text("  " + when(category) {
+                "INICIO" -> "⌂   Inicio"
+                "TV EN VIVO" -> "▣   TV"
+                "VOD" -> "▰   Películas"
+                "SERIES" -> "▤   Series"
+                "TELENOVELAS" -> "♡   Telenovelas"
+                "DEPORTES" -> "⚽   Deportes"
+                "FAVORITOS" -> "★   Favoritos"
+                "TODAS" -> "☷   Explorar"
+                else -> "•   $category"
+            }, 14f).apply {
+                setTextColor(if (active) 0xFFFFFFFF.toInt() else 0xFFB6C2D3.toInt())
+                setBackgroundColor(if (active) 0xFF2469D8.toInt() else 0x00000000)
+                isFocusable = true
+                isClickable = true
+                setOnClickListener {
+                    selectedCategory = if (category == "INICIO") "TODAS" else category
+                    searchTerm = ""
+                    if (::searchView.isInitialized) searchView.setText("")
+                    renderSidebar()
+                    renderChannels()
+                }
+            }
+            sidebar.addView(item, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(4) })
+        }
+        sidebar.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        sidebar.addView(text("Importa tu lista M3U para comenzar", 10f).apply { setTextColor(0xFF75849B.toInt()) })
     }
 
     private fun toggleFullscreen() {
         fullScreen = !fullScreen
-        val flags = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        val flags = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         window.decorView.systemUiVisibility = if (fullScreen) flags else View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        sidebar.visibility = if (fullScreen) View.GONE else View.VISIBLE
         header.visibility = if (fullScreen) View.GONE else View.VISIBLE
         status.visibility = if (fullScreen) View.GONE else View.VISIBLE
-        toolsScroll.visibility = if (fullScreen) View.GONE else View.VISIBLE
-        searchView.visibility = if (fullScreen) View.GONE else View.VISIBLE
         channelScroll.visibility = if (fullScreen) View.GONE else View.VISIBLE
-        contentArea.orientation = LinearLayout.VERTICAL
-        playerView.layoutParams = LinearLayout.LayoutParams(-1, if (fullScreen) -1 else dp(220))
-        header.getChildAt(1)?.let { (it as? Button)?.text = if (fullScreen) "Salir ⛶" else "⛶ Pantalla completa" }
+        heroContainer.layoutParams = LinearLayout.LayoutParams(-1, if (fullScreen) -1 else dp(285))
+        if (!fullScreen && selectedChannel == null) heroPlaceholder.visibility = View.VISIBLE
+        header.getChildAt(2)?.let { (it as? Button)?.text = if (fullScreen) "Salir" else "⛶" }
     }
 
     @Deprecated("Deprecated in Android API 33; retained for back navigation")
@@ -200,6 +288,14 @@ class MainActivity : AppCompatActivity() {
     private fun renderChannels() {
         if (!::listBox.isInitialized) return
         listBox.removeAllViews()
+        if (::heroPlaceholder.isInitialized && selectedChannel == null) {
+            heroPlaceholder.visibility = View.VISIBLE
+            heroPlaceholder.text = if (channels.isEmpty()) "BIENVENIDO A MI IPTV\n\nImporta tu lista M3U para comenzar" else "ELIGE ALGO PARA VER\n\nSelecciona un canal o contenido"
+            playerView.visibility = View.GONE
+        } else if (::heroPlaceholder.isInitialized) {
+            heroPlaceholder.visibility = View.GONE
+            playerView.visibility = View.VISIBLE
+        }
         val filtered = channels.filter { channel ->
             val categoryMatch = when (selectedCategory) {
                 "TODAS" -> true
@@ -210,63 +306,75 @@ class MainActivity : AppCompatActivity() {
         }
         status.text = "$playlistName · ${channels.size} elementos · $selectedCategory · ${filtered.size} encontrados"
         if (filtered.isEmpty()) {
-            listBox.addView(text("No hay elementos en esta categoría. Importa una lista M3U o elige otra.", 14f))
+            listBox.addView(text(if (channels.isEmpty()) "Tu biblioteca aparecerá aquí cuando importes una lista M3U." else "No hay contenido en esta categoría.", 14f))
+            renderSidebar()
             return
         }
-        val visibleChannels = filtered.take(maxVisibleChannels)
-        if (filtered.size > maxVisibleChannels) listBox.addView(text("Mostrando los primeros $maxVisibleChannels de ${filtered.size}. Usa Buscar para encontrar otros.", 12f))
-        var lastEpisodeHeader = ""
-        visibleChannels.forEach { channel ->
-            if (channel.group.equals("SERIES", true) || channel.group.equals("TELENOVELAS", true)) {
-                val ep = episodeInfo(channel.name)
-                val episodeHeader = "${ep.series} · Temporada ${ep.season}"
-                if (episodeHeader != lastEpisodeHeader) {
-                    listBox.addView(text(episodeHeader, 13f).apply { setTextColor(0xFF80B9FF.toInt()) })
-                    lastEpisodeHeader = episodeHeader
-                }
+
+        val groups = if (selectedCategory == "TODAS") filtered.groupBy { it.group } else mapOf(selectedCategory to filtered)
+        groups.forEach { (groupName, items) ->
+            val sectionTitle = text(groupName.uppercase(Locale.ROOT), 17f).apply {
+                setTextColor(0xFFEAF2FF.toInt())
+                setPadding(dp(2), dp(12), dp(2), dp(8))
             }
-            val selected = selectedChannel?.url == channel.url
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(9), dp(7), dp(8), dp(7))
-                isFocusable = true; isClickable = true
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(if (selected) 0xFF173B61.toInt() else 0xFF111B2A.toInt())
-                    cornerRadius = dp(10).toFloat()
-                    if (selected) setStroke(dp(2), 0xFF45A5FF.toInt())
+            listBox.addView(sectionTitle)
+            val horizontal = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+            val cards = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            items.take(maxVisibleChannels).forEach { channel ->
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(dp(7), dp(7), dp(7), dp(7))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(if (selectedChannel?.url == channel.url) 0xFF1B3C68.toInt() else 0xFF111B2B.toInt())
+                        cornerRadius = dp(11).toFloat()
+                        if (selectedChannel?.url == channel.url) setStroke(dp(2), 0xFF55A5FF.toInt())
+                    }
+                    isFocusable = true
+                    isClickable = true
+                    setOnClickListener {
+                        selectedChannel = channel
+                        heroPlaceholder.visibility = View.GONE
+                        playerView.visibility = View.VISIBLE
+                        play(channel)
+                        renderChannels()
+                    }
+                    setOnLongClickListener {
+                        val actions = arrayOf(if (channel.favorite) "Quitar de favoritos" else "Agregar a favoritos", "Editar elemento", "Eliminar elemento")
+                        AlertDialog.Builder(this@MainActivity).setTitle(channel.name).setItems(actions) { _, which ->
+                            when (which) {
+                                0 -> { channel.favorite = !channel.favorite; save(); renderChannels() }
+                                1 -> editChannel(channel)
+                                2 -> confirmDelete(channel)
+                            }
+                        }.show()
+                        true
+                    }
                 }
-            }
-            row.addView(View(this).apply { setBackgroundColor(if (selected) 0xFF45A5FF.toInt() else 0xFF26364B.toInt()) },
-                LinearLayout.LayoutParams(dp(3), dp(42)).apply { rightMargin = dp(9) })
-            if (channel.logo.isNotBlank()) {
                 val poster = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
-                    layoutParams = LinearLayout.LayoutParams(dp(48), dp(42)).apply { rightMargin = dp(9) }
-                    contentDescription = "Logo de ${channel.name}"
+                    setBackgroundColor(0xFF202D42.toInt())
+                    contentDescription = "Imagen de ${channel.name}"
                 }
-                Glide.with(this@MainActivity).load(channel.logo).diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
-                    .placeholder(android.R.drawable.ic_media_play).error(android.R.drawable.ic_media_play).into(poster)
-                row.addView(poster)
+                if (channel.logo.isNotBlank()) {
+                    Glide.with(this@MainActivity).load(channel.logo).diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+                        .placeholder(android.R.drawable.ic_media_play).error(android.R.drawable.ic_media_play).into(poster)
+                } else {
+                    poster.setImageResource(android.R.drawable.ic_media_play)
+                    poster.scaleType = ImageView.ScaleType.CENTER
+                }
+                card.addView(poster, LinearLayout.LayoutParams(dp(154), dp(100)))
+                card.addView(text(channel.name, 12f).apply {
+                    maxLines = 2
+                    setTextColor(if (selectedChannel?.url == channel.url) 0xFFFFFFFF.toInt() else 0xFFDCE5F2.toInt())
+                    setPadding(dp(2), dp(7), dp(2), dp(2))
+                }, LinearLayout.LayoutParams(dp(154), dp(48)))
+                cards.addView(card, LinearLayout.LayoutParams(dp(168), dp(166)).apply { rightMargin = dp(9) })
             }
-            val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            labels.addView(text(channel.name, 14f).apply { setPadding(0, 0, 0, dp(2)); setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFE5EAF2.toInt()) })
-            labels.addView(text(channel.group + if (channel.favorite) "  ★" else "", 10f).apply {
-                setPadding(0, 0, 0, 0); setTextColor(if (selected) 0xFF9ED0FF.toInt() else 0xFF91A0B5.toInt())
-            })
-            row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-            row.setOnClickListener { selectedChannel = channel; play(channel); renderChannels() }
-            row.setOnLongClickListener {
-                val actions = arrayOf(if (channel.favorite) "Quitar de favoritos" else "Agregar a favoritos", "Editar elemento", "Eliminar elemento")
-                AlertDialog.Builder(this).setTitle(channel.name).setItems(actions) { _, which ->
-                    when (which) {
-                        0 -> { channel.favorite = !channel.favorite; save(); renderChannels() }
-                        1 -> editChannel(channel)
-                        2 -> confirmDelete(channel)
-                    }
-                }.show()
-                true
-            }
-            listBox.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            horizontal.addView(cards)
+            listBox.addView(horizontal, LinearLayout.LayoutParams(-1, dp(174)))
         }
+        renderSidebar()
     }
 
     private data class EpisodeInfo(val series: String, val season: Int, val episode: Int)
